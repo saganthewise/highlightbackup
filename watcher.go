@@ -1,15 +1,22 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/fsnotify/fsnotify"
 	"github.com/harry1453/go-common-file-dialog/cfd"
-	"github.com/joho/godotenv"
 )
+
+type Config struct {
+	Clippath string
+	Savepath string
+}
 
 func Copy(src, dst string) error {
 	in, err := os.Open(src)
@@ -32,27 +39,61 @@ func Copy(src, dst string) error {
 }
 
 func main() {
-	err := godotenv.Load()
+	var (
+		config Config
+		buf    = new(bytes.Buffer)
+	)
+	_, err := toml.DecodeFile("config.toml", &config)
 	if err != nil {
 		log.Fatal(err)
 	}
-	pickFolderDialog, err := cfd.NewSelectFolderDialog(cfd.DialogConfig{
-		Title: "Pick Folder",
-		Role:  "PickFolderExample",
-	})
+	if config.Clippath == "" {
+		pickFolderDialog, err := cfd.NewSelectFolderDialog(cfd.DialogConfig{
+			Title: "Pick Clip Folder",
+			Role:  "Pick Clip Folder",
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := pickFolderDialog.Show(); err != nil {
+			log.Fatal(err)
+		}
+		result, err := pickFolderDialog.GetResult()
+		config.Clippath = result
+	}
+	if config.Savepath == "" {
+		pickFolderDialog, err := cfd.NewSelectFolderDialog(cfd.DialogConfig{
+			Title: "Pick Save Folder",
+			Role:  "Pick Save Folder",
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := pickFolderDialog.Show(); err != nil {
+			log.Fatal(err)
+		}
+		result, err := pickFolderDialog.GetResult()
+		config.Savepath = result
+	}
+	err = toml.NewEncoder(buf).Encode(config)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := pickFolderDialog.Show(); err != nil {
+	f, err := os.Create("config.toml")
+	if err != nil {
 		log.Fatal(err)
 	}
-	result, err := pickFolderDialog.GetResult()
+	defer f.Close()
+	_, err = f.WriteString(buf.String())
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(buf.String())
 	if err == cfd.ErrorCancelled {
 		log.Fatal("Dialog was cancelled by the user.")
 	} else if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Chosen folder: %s\n", result)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
@@ -70,7 +111,7 @@ func main() {
 				log.Println("event:", event)
 				if event.Op&fsnotify.Write == fsnotify.Write {
 					filename := strings.Split(event.Name, "\\")
-					Copy(event.Name, os.Getenv("SAVEPATH")+"//"+filename[len(filename)-1])
+					Copy(event.Name, config.Savepath+"//"+filename[len(filename)-1])
 
 				}
 			case err, ok := <-watcher.Errors:
@@ -82,7 +123,7 @@ func main() {
 		}
 	}()
 
-	err = watcher.Add(os.Getenv("CLIPPATH"))
+	err = watcher.Add(config.Clippath)
 	if err != nil {
 		log.Fatal(err)
 	}
